@@ -71,6 +71,26 @@ You can change the setting in [`run_render.py`](run_render.py) to create your ow
 ## Training
 We provide template training configurations in `configs/` for different settings. 
 
+To train A-NeRF on our pre-processed ZJU-Mocap dataset,
+```
+# process data
+for SPLIT in train val_ood val_ind val_view; do python -m core.load_zju -s 313 --split $SPLIT; done;
+
+# training
+CUDA_VISIBLE_DEVICES=0 python run_nerf.py --config configs/zju_mocap/313.txt --split train
+
+# test
+CUDA_VISIBLE_DEVICES=1 python run_render.py --nerf_args logs/zju_mocap/args.txt --ckptpath logs/zju_mocap/100000.tar --split val_ood --dataset neuralbody --entry 313 --render_type val --runname zju_313_val_ood --render_res 512 512 --save_gt
+
+CUDA_VISIBLE_DEVICES=0 python run_render.py --nerf_args logs/zju_mocap/args.txt --ckptpath logs/zju_mocap/100000.tar --split val_view --dataset neuralbody --entry 313 --render_type val --runname zju_313_val_view --render_res 512 512 --save_gt
+
+CUDA_VISIBLE_DEVICES=0 python run_render.py --nerf_args logs/zju_mocap/args.txt --ckptpath logs/zju_mocap/100000.tar --split val_ind --dataset neuralbody --entry 313 --render_type val --runname zju_313_val_ind --render_res 512 512 --save_gt
+
+# compute metrics
+python psnr.py
+
+```
+
 To train A-NeRF on our pre-processed SURREAL dataset,
 ```
 python run_nerf.py --config configs/surreal/surreal.txt --basedir logs  --expname surreal_model

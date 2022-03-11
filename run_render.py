@@ -42,6 +42,8 @@ def config_parser():
                         help='tuple of resolution in (H, W) for rendering')
     parser.add_argument('--dataset', type=str, required=True,
                         help='dataset to render')
+    parser.add_argument("--split", type=str, default='val_ood',
+                        help='use validation / train set')
     parser.add_argument('--entry', type=str, required=True,
                         help='entry in the dataset catalog to render')
     parser.add_argument('--white_bkgd', action='store_true',
@@ -226,7 +228,7 @@ def load_render_data(args, nerf_args, poseopt_layer=None, opt_framecode=True):
                                                                  is_surreal=is_surreal,
                                                                  is_neuralbody=is_neuralbody,
                                                                  **render_data)
-        if not is_surreal:
+        if not is_surreal and not is_neuralbody:
             try:
                 bg_imgs = dd.io.load(data_h5, '/bkgds').astype(np.float32).reshape(-1, H, W, 3) / 255.
                 bg_indices = dd.io.load(data_h5, '/bkgd_idxs')[cam_idxs].astype(np.int64)
@@ -439,11 +441,14 @@ def init_catalog(args, n_bullet=10):
     }
 
     # NeuralBody
-    nb_subjects = ['315', '377', '386', '387', '390', '392', '393', '394']
+    nb_subjects = ['313', '315', '377', '386', '387', '390', '392', '393', '394']
     # TODO: hard-coded: 6 views
     nb_idxs = np.arange(len(np.concatenate([np.arange(1, 31), np.arange(400, 601)])) * 6)
-    nb_dict = lambda subject: {'data_h5': f'data/zju_mocap/{subject}_test_h5py.h5',
-                               'val': set_dict(nb_idxs, length=1, skip=1)}
+    nb_dict = lambda subject: {'data_h5': f'data/zju_mocap/{subject}_{args.split}.h5',
+                               'val': {'length': 1, 'skip': 1}
+                            #    set_dict(nb_idxs, length=1, skip=1)
+                                
+                               }
 
     RenderCatalog['h36m'] = {
         'S9': h36m_s9,
@@ -536,8 +541,8 @@ def load_retarget(pose_h5, c2ws, focals, rest_pose, pose_keys,
         elif is_neuralbody:
             kps, bones = dd.io.load(pose_h5, pose_keys)
             # TODO: hard-coded, could be problematic
-            kps = kps.reshape(-1, 1, 24, 3).repeat(6, 1).reshape(-1, 24, 3)
-            bones = bones.reshape(-1, 1, 24, 3).repeat(6, 1).reshape(-1, 24, 3)
+            # kps = kps.reshape(-1, 1, 24, 3).repeat(6, 1).reshape(-1, 24, 3)
+            # bones = bones.reshape(-1, 1, 24, 3).repeat(6, 1).reshape(-1, 24, 3)
         else:
             kps, bones = dd.io.load(pose_h5, pose_keys)
             kps = kps[None].repeat(9, 0).reshape(-1, 24, 3)[selected_idxs]
@@ -1014,7 +1019,7 @@ def run_render():
                                       **tensor_data)
 
     if gt_dict['gt_paths'] is not None:
-        if args.eval:
+        if True:
             evaluate_metric(rgbs, accs, bboxes, gt_dict, basedir)
             pass
 

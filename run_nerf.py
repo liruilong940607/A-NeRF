@@ -383,8 +383,8 @@ def config_parser():
                         help='subject to train with on mixamo')
     parser.add_argument("--camera", type=int, default=None,
                         help='camera to use')
-    parser.add_argument("--use_val", action='store_true',
-                        help='use validation set during training')
+    parser.add_argument("--split", type=str, default='train',
+                        help='use validation / train set')
     parser.add_argument("--white_bkgd", action='store_true',
                         help='set to render synthetic data on a white bkgd (always use for dvoxels)')
     parser.add_argument("--ext_scale", type=float, default=0.001,

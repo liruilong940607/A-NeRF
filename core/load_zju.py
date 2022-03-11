@@ -4,6 +4,7 @@ import torch
 import imageio
 import numpy as np
 from smplx import SMPL
+import math
 
 from .dataset import BaseH5Dataset
 from .process_spin import SMPL_JOINT_MAPPER, write_to_h5py
@@ -14,19 +15,19 @@ zju_to_nerf_rot = np.array([[1, 0, 0],
                             [0, 0,-1],
                             [0, 1, 0]], dtype=np.float32)
 
-num_train_frames = {
-    '313': 60,
-    '315': 300,
-    '377': 300,
-    '386': 300,
-    '387': 300,
-    '390': 300, # begin ith frame == 700
-    '392': 300,
-    '393': 300,
-    '394': 300,
-    '395': 300,
-    '396': 540, # begin ith frame == 810
-}
+# num_train_frames = {
+#     '313': 60,
+#     '315': 300,
+#     '377': 300,
+#     '386': 300,
+#     '387': 300,
+#     '390': 300, # begin ith frame == 700
+#     '392': 300,
+#     '393': 300,
+#     '394': 300,
+#     '395': 300,
+#     '396': 540, # begin ith frame == 810
+# }
 
 def get_mask(path, img_path, erode_border=False):
     '''
@@ -185,12 +186,6 @@ def process_zju_data(data_path, subject='377', training_view=[0, 6, 12, 18],
     assert ext_scale == 0.001 # TODO: deal with this later
     # TODO: might have to check if this is true for all
     H = W = 1024 # default image size.
-    ni = num_train_frames[subject]
-    begin_i = 0
-    if subject == '390':
-        begin_i = 700
-    elif subject == '396':
-        begin_i = 810
 
     if res is not None:
         H = int(H * res)
@@ -201,29 +196,46 @@ def process_zju_data(data_path, subject='377', training_view=[0, 6, 12, 18],
     annots = np.load(annot_path, allow_pickle=True).item()
     cams = annots['cams']
     num_cams = len(cams['K'])
-    i = begin_i
     if split == 'train':
         view = training_view
-        idxs = slice(i, i + ni * i_intv)
     else:
-        view = [1,4,5,10,17,20]
-        if subject != '392':
-            idxs = np.concatenate([np.arange(1, 31), np.arange(400, 601)])
-        else:
-            idxs = np.concatenate([np.arange(1, 31), np.arange(400, 556)])
-        i_intv = 1
-
+        view = [i for i in range(21) if i not in training_view]
+    
+    if split == "val_ood":
+        frame_list = np.loadtxt(
+            os.path.join(subject_path, "splits/val_ood.txt"), dtype=int
+        ).tolist()  
+    elif split == "val_ind":
+        frame_list = np.loadtxt(
+            os.path.join(subject_path, "splits/val_ind.txt"), dtype=int
+        ).tolist() 
+    else:
+        frame_list = np.loadtxt(
+            os.path.join(subject_path, "splits/train.txt"), dtype=int
+        ).tolist()  
+    annots['ims'] = [annots['ims'][i] for i in frame_list]
 
     # extract image and the corresponding camera indices
     img_paths = np.array([
         np.array(imgs_data['ims'])[view]
-        for imgs_data in np.array(annots['ims'])[idxs][::i_intv]
+        # for imgs_data in np.array(annots['ims'])[idxs][::i_intv]
+        for imgs_data in annots['ims']
     ]).ravel()
 
     cam_idxs = np.array([
         np.arange(len(imgs_data['ims']))[view]
-        for imgs_data in np.array(annots['ims'])[idxs][::i_intv]
+        # for imgs_data in np.array(annots['ims'])[idxs][::i_intv]
+        for imgs_data in annots['ims']
     ]).ravel()
+
+    if split != "train":
+        eval_render_every = math.ceil(len(img_paths) / 400)
+        img_paths = img_paths[::eval_render_every]
+        cam_idxs = cam_idxs[::eval_render_every]
+
+    print ("num of frames", len(frame_list))
+    print ("num of cameras", len(cam_idxs))
+    print ("num of images:", len(img_paths))
 
     # Extract information from the dataset.
     imgs = np.zeros((len(img_paths), H, W, 3), dtype=np.uint8)
@@ -259,8 +271,8 @@ def process_zju_data(data_path, subject='377', training_view=[0, 6, 12, 18],
             kp_idx = int(os.path.basename(img_path)[:-4])
 
         imgs[i] = img
-        masks[i] = mask
-        sampling_masks[i] = sampling_mask
+        masks[i] = mask[..., None]
+        sampling_masks[i] = sampling_mask[..., None]
         kp_idxs.append(kp_idx)
 
     unique_cams = np.unique(cam_idxs)
@@ -307,8 +319,9 @@ def process_zju_data(data_path, subject='377', training_view=[0, 6, 12, 18],
     c2ws = swap_mat(c2ws) # to NeRF format
 
     # get pose-related data
-    betas, kp3d, bones, skts, rest_pose, vertices, pose_scale = get_smpls(subject_path, np.unique(kp_idxs),
-                                                                          scale_to_ref=False)
+    betas, kp3d, bones, skts, rest_pose, vertices, pose_scale = get_smpls(subject_path, kp_idxs,
+                                                                          scale_to_ref=False,
+                                                                          model_path="/home/ruilongli/data/smpl_model/smpl/")
     cyls = get_kp_bounding_cylinder(kp3d,
                                     ext_scale=ext_scale,
                                     skel_type=skel_type,
@@ -316,12 +329,12 @@ def process_zju_data(data_path, subject='377', training_view=[0, 6, 12, 18],
                                     top_expand_ratio=1.00,
                                     bot_expand_ratio=0.25,
                                     head='-y')
-    if split == 'test':
-        kp_idxs = np.arange(len(kp_idxs))
-    elif subject == '313' or subject == '315':
-        kp_idxs = np.array(kp_idxs) - 1
-    elif subject == '390':
-        kp_idxs = np.array(kp_idxs) - 700
+    # if split != 'train':
+    #     kp_idxs = np.arange(len(kp_idxs))
+    # elif subject == '313' or subject == '315':
+    #     kp_idxs = np.array(kp_idxs) - 1
+    # elif subject == '390':
+    #     kp_idxs = np.array(kp_idxs) - 700
 
     return {'imgs': np.array(imgs),
             'bkgds': np.array(bkgds),
@@ -330,7 +343,7 @@ def process_zju_data(data_path, subject='377', training_view=[0, 6, 12, 18],
             'sampling_masks': np.array(sampling_masks).reshape(-1, H, W, 1),
             'c2ws': c2ws.astype(np.float32),
             'img_pose_indices': cam_idxs,
-            'kp_idxs': np.array(kp_idxs),
+            'kp_idxs': np.arange(len(kp_idxs)),
             'centers': centers.astype(np.float32),
             'focals': focals.astype(np.float32),
             'kp3d': kp3d.astype(np.float32),
@@ -542,17 +555,16 @@ class ZJUMocapDataset(BaseH5Dataset):
         super(ZJUMocapDataset, self).__init__(*args, **kwargs)
 
     def init_meta(self):
-        if self.split == 'test':
-            self.h5_path = self.h5_path.replace('train', 'test')
+        self.h5_path = self.h5_path.replace('train', self.split)
         super(ZJUMocapDataset, self).init_meta()
 
         dataset = h5py.File(self.h5_path, 'r')
         self.kp_idxs = dataset['kp_idxs'][:]
         self.cam_idxs = dataset['img_pose_indices'][:]
 
-        if self.split == 'test':
-            n_unique_cam = len(np.unique(self.cam_idxs))
-            self.kp_idxs = self.kp_idxs // n_unique_cam
+        # if self.split == 'test':
+        #     n_unique_cam = len(np.unique(self.cam_idxs))
+        #     self.kp_idxs = self.kp_idxs // n_unique_cam
 
         print('WARNING: ZJUMocap does not support pose refinement for now (_get_subset_idxs is not implemented)')
         dataset.close()
@@ -567,7 +579,7 @@ class ZJUMocapDataset(BaseH5Dataset):
         q_idx: the 'queried' index(s) received from the sampler,
                may not coincide with idx.
         '''
-        return self.kp_idxs[idx], q_idx
+        return idx, q_idx
 
     def get_cam_idx(self, idx, q_idx):
         '''
@@ -660,15 +672,17 @@ if __name__ == '__main__':
     split = args.split
 
     if dataset == 'mocap':
-        data_path = 'data/zju_mocap/'
+        data_path = '/home/ruilongli/data/zju_mocap/neuralbody/'
+        save_path = 'data/zju_mocap/'
         print(f"Processing {subject}_{split}...")
-        data = process_zju_data(data_path, subject, split=split, res=1.0)
+        data = process_zju_data(data_path, subject, split=split, res=0.5)
     elif dataset == 'h36m':
         data_path = 'data/h36m_zju'
+        save_path = 'data/h36m_zju'
         print(f"Processing {subject}_{split}...")
         data = process_h36m_zju_data(data_path, subject, split=split, res=1.0)
     else:
         raise NotImplementedError(f'Unknown dataset {dataset}')
 
-    write_to_h5py(os.path.join(data_path, f"{subject}_{split}.h5"), data)
+    write_to_h5py(os.path.join(save_path, f"{subject}_{split}.h5"), data)
 

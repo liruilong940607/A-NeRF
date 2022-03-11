@@ -37,7 +37,7 @@ DATASET_CATALOG = {
         'james': 'data/mixamo/James_processed_h5py.h5',
         'archer': 'data/mixamo/Archer_processed_h5py.h5',
     },
-    'zju': {k: f'data/zju_mocap/{k}_train_h5py.h5' for k in ['315', '377', '386', '387', '390', '392', '393',
+    'zju': {k: f'data/zju_mocap/{k}_train.h5' for k in ['313', '315', '377', '386', '387', '390', '392', '393',
                                                              '394']
     },
 }
@@ -114,7 +114,7 @@ def get_dataset(args):
 
 def get_dataset_from_catalog(args, N_samples, dataset_type, subject=None, N_nms=0):
 
-    split = 'full' if not args.use_val else 'train'
+    split = args.split
 
     shared_kwargs = {'N_samples': N_samples,
                      'split': split,
